@@ -1,0 +1,54 @@
+# Dependencies
+node_modules
+admin-app/node_modules
+functions/node_modules
+
+# Build outputs
+build
+dist
+admin-app/dist
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.development
+admin-app/.env
+admin-app/.env.local
+functions/.env
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Firebase / local config
+.firebase
+.firebaserc.local
+
+# Android / Capacitor generated files
+admin-app/android/.gradle
+admin-app/android/build
+admin-app/android/app/build
+admin-app/android/local.properties
+admin-app/android/captures
+admin-app/android/.idea
+admin-app/android/app/release
+admin-app/android/app/debug
+
+# Android Studio / IDE files
+.idea
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary / cache
+.cache
+.tmp
+temp
