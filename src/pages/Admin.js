@@ -2085,37 +2085,6 @@ export default function Admin() {
   );
 }
 
-async function sendTelegramStatusNotification(booking, status) {
-  const botToken = process.env.REACT_APP_TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.REACT_APP_TELEGRAM_CHAT_ID;
-
-  if (!botToken || !chatId) return;
-
-  const response = await fetch(
-    `https://api.telegram.org/bot${botToken}/sendMessage`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: [
-          'Oxford Barber booking status updated',
-          `Name: ${booking.customerName || 'No name'}`,
-          `Phone: ${booking.phone || 'No phone'}`,
-          `Service: ${booking.serviceName || 'No service'}`,
-          `Date: ${booking.bookingDate || 'No date'}`,
-          `Time: ${booking.bookingTime || 'No time'}`,
-          `Status: ${status}`,
-        ].join('\n'),
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error('Telegram status notification failed');
-  }
-}
-
 function shouldSendBrowserNotifications(preferenceKey) {
   if (typeof window === 'undefined' || typeof Notification === 'undefined') {
     return false;

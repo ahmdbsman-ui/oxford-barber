@@ -19,6 +19,7 @@ const ADMIN_EMAILS = new Set([
   'Basmanaljumayli51@gmail.com',
 ].map(normalizeEmail));
 const REMINDER_WINDOW_MS = 24 * 60 * 60 * 1000;
+const REMINDER_LOCK_WINDOW_MS = 15 * 60 * 1000;
 
 function buildApprovalSmsMessage(booking) {
   const queueText = booking.queueNumber ? ` Queue: #${booking.queueNumber}.` : '';
@@ -64,13 +65,64 @@ async function assertAdminRequest(req) {
 }
 
 async function sendSmsMessage(to, body) {
+  const normalizedPhone = normalizeAustralianPhoneNumber(to);
   const client = twilio(twilioAccountSid.value(), twilioAuthToken.value());
 
   return client.messages.create({
-    to,
+    to: normalizedPhone,
     from: twilioFromNumber.value(),
     body,
   });
+}
+
+function normalizeAustralianPhoneNumber(phone) {
+  const rawValue = String(phone || '').trim();
+
+  if (!rawValue) {
+    throw new Error('Missing phone number.');
+  }
+
+  const sanitized = rawValue.replace(/[^\d+]/g, '');
+
+  if (sanitized.startsWith('+')) {
+    if (!sanitized.startsWith('+61')) {
+      throw new Error(`Only Australian phone numbers are supported: ${rawValue}`);
+    }
+
+    const digits = sanitized.slice(1);
+
+    if (!/^\d{10,12}$/.test(digits)) {
+      throw new Error(`Invalid Australian phone number: ${rawValue}`);
+    }
+
+    return `+${digits}`;
+  }
+
+  const digitsOnly = sanitized.replace(/\D/g, '');
+
+  if (digitsOnly.startsWith('61')) {
+    if (!/^\d{10,12}$/.test(digitsOnly)) {
+      throw new Error(`Invalid Australian phone number: ${rawValue}`);
+    }
+
+    return `+${digitsOnly}`;
+  }
+
+  if (digitsOnly.startsWith('0')) {
+    const nationalNumber = digitsOnly.slice(1);
+
+    if (!/^\d{9}$/.test(nationalNumber)) {
+      throw new Error(`Invalid Australian phone number: ${rawValue}`);
+    }
+
+    return `+61${nationalNumber}`;
+  }
+
+  if (/^\d{9}$/.test(digitsOnly)) {
+    return `+61${digitsOnly}`;
+  }
+
+  throw new Error(`Invalid Australian phone number: ${rawValue}`);
 }
 
 function getSydneyNow() {
@@ -92,6 +144,16 @@ function getAppointmentDateTime(booking) {
   }
 
   return new Date(year, month - 1, day, hours, minutes, 0, 0);
+}
+
+function isRecentReminderLock(value, now) {
+  if (!value) return false;
+
+  const parsed = Date.parse(String(value));
+
+  if (!Number.isFinite(parsed)) return false;
+
+  return now.getTime() - parsed < REMINDER_LOCK_WINDOW_MS;
 }
 
 exports.sendBookingApprovedSms = onRequest(
@@ -187,16 +249,20 @@ exports.handleAdminBookingAction = onRequest(
         }
 
         if (shouldConfirm && mergedBooking.phone) {
+          const normalizedPhone = normalizeAustralianPhoneNumber(mergedBooking.phone);
+
           await sendSmsMessage(
-            mergedBooking.phone,
+            normalizedPhone,
             buildApprovalSmsMessage({
               ...mergedBooking,
+              phone: normalizedPhone,
               status: 'confirmed',
             })
           );
 
           await bookingRef.set(
             {
+              phone: normalizedPhone,
               approvalSmsSentAt: nowIso,
             },
             { merge: true }
@@ -248,34 +314,81 @@ exports.sendBookingReminderSms = onSchedule(
       .get();
 
     const sendJobs = snapshot.docs.map(async (bookingDoc) => {
-      const booking = bookingDoc.data();
+      let lockedBooking;
 
-      if (booking.reminderSmsSent === true) {
-        return;
-      }
+      await admin.firestore().runTransaction(async (transaction) => {
+        const freshSnapshot = await transaction.get(bookingDoc.ref);
+        const booking = freshSnapshot.data();
 
-      const appointmentDateTime = getAppointmentDateTime(booking);
+        if (!booking) {
+          return;
+        }
 
-      if (!appointmentDateTime) {
-        return;
-      }
+        if (booking.status !== 'confirmed') {
+          return;
+        }
 
-      const timeUntilAppointment =
-        appointmentDateTime.getTime() - now.getTime();
+        if (booking.reminderSmsSent === true) {
+          return;
+        }
 
-      if (timeUntilAppointment <= 0 || timeUntilAppointment > REMINDER_WINDOW_MS) {
-        return;
-      }
+        if (isRecentReminderLock(booking.reminderSmsProcessingAt, now)) {
+          return;
+        }
 
-      await sendSmsMessage(
-        booking.phone,
-        buildReminderSmsMessage(booking)
-      );
+        const appointmentDateTime = getAppointmentDateTime(booking);
 
-      await bookingDoc.ref.update({
-        reminderSmsSent: true,
-        reminderSmsSentAt: new Date().toISOString(),
+        if (!appointmentDateTime) {
+          return;
+        }
+
+        const timeUntilAppointment =
+          appointmentDateTime.getTime() - now.getTime();
+
+        if (timeUntilAppointment <= 0 || timeUntilAppointment > REMINDER_WINDOW_MS) {
+          return;
+        }
+
+        const normalizedPhone = normalizeAustralianPhoneNumber(booking.phone);
+
+        lockedBooking = {
+          ...booking,
+          phone: normalizedPhone,
+        };
+
+        transaction.update(bookingDoc.ref, {
+          phone: normalizedPhone,
+          reminderSmsProcessingAt: now.toISOString(),
+        });
       });
+
+      if (!lockedBooking) {
+        return;
+      }
+
+      try {
+        await sendSmsMessage(
+          lockedBooking.phone,
+          buildReminderSmsMessage(lockedBooking)
+        );
+
+        await bookingDoc.ref.update({
+          phone: lockedBooking.phone,
+          reminderSmsSent: true,
+          reminderSmsSentAt: new Date().toISOString(),
+          reminderSmsProcessingAt: admin.firestore.FieldValue.delete(),
+        });
+      } catch (error) {
+        console.error('sendBookingReminderSms job failed:', {
+          bookingId: bookingDoc.id,
+          code: error?.code || 'unknown',
+          message: error?.message || 'Unknown reminder SMS error',
+        });
+
+        await bookingDoc.ref.update({
+          reminderSmsProcessingAt: admin.firestore.FieldValue.delete(),
+        });
+      }
     });
 
     await Promise.all(sendJobs);
@@ -285,4 +398,5 @@ exports.sendBookingReminderSms = onSchedule(
 exports._internal = {
   buildApprovalSmsMessage,
   buildReminderSmsMessage,
+  normalizeAustralianPhoneNumber,
 };
