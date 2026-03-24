@@ -438,12 +438,10 @@ export default function Booking() {
       return generatedSlots;
     }
 
-    const currentSydneyMinutes = getSydneyNowMinutes();
-
     return generatedSlots.filter(
       (slotTime) => timeToMinutes(slotTime) > currentSydneyMinutes
     );
-  }, [currentSydneyMinuteTick, isBookingsClosed, selectedDate, totalDuration]);
+  }, [currentSydneyMinutes, isBookingsClosed, selectedDate, totalDuration]);
 
   const unavailableTimes = useMemo(
     () =>
@@ -491,6 +489,11 @@ export default function Booking() {
 
     return () => window.clearInterval(timer);
   }, []);
+
+  const currentSydneyMinutes = useMemo(
+    () => getSydneyNowMinutes(),
+    [currentSydneyMinuteTick]
+  );
 
   useEffect(() => {
     if (resendCooldown <= 0) return undefined;

@@ -48,13 +48,16 @@ export default function Home() {
     return () => window.clearInterval(intervalId);
   }, []);
 
+  const currentBusinessStatusTime = useMemo(() => new Date(), [statusTick]);
+
   const businessStatus = useMemo(
     () =>
       getCurrentBusinessStatus({
         vacationMode: Boolean(siteSettings.vacationMode),
         scheduledClosures,
+        now: currentBusinessStatusTime,
       }),
-    [scheduledClosures, siteSettings.vacationMode, statusTick]
+    [currentBusinessStatusTime, scheduledClosures, siteSettings.vacationMode]
   );
 
   const businessStatusDebugText = businessStatus.reason || 'unknown_status';
