@@ -20,29 +20,83 @@ const ADMIN_EMAILS = new Set([
 ].map(normalizeEmail));
 const REMINDER_WINDOW_MS = 24 * 60 * 60 * 1000;
 const REMINDER_LOCK_WINDOW_MS = 15 * 60 * 1000;
+const BUSINESS_TIME_ZONE = 'Australia/Sydney';
+
+function formatBookingServicesText(booking) {
+  if (booking?.serviceNames) {
+    return String(booking.serviceNames).trim();
+  }
+
+  if (booking?.selectedServices && Array.isArray(booking.selectedServices)) {
+    const names = booking.selectedServices
+      .map((service) => String(service?.name || '').trim())
+      .filter(Boolean);
+
+    if (names.length > 0) {
+      return names.join(' + ');
+    }
+  }
+
+  if (booking?.services && Array.isArray(booking.services)) {
+    const names = booking.services
+      .map((service) =>
+        typeof service === 'string'
+          ? service.trim()
+          : String(service?.name || '').trim()
+      )
+      .filter(Boolean);
+
+    if (names.length > 0) {
+      return names.join(' + ');
+    }
+  }
+
+  return String(booking?.serviceName || 'Booking').trim();
+}
+
+function formatSmsTimeLabel(time) {
+  const [hours, minutes] = String(time || '').split(':').map(Number);
+
+  if ([hours, minutes].some((value) => Number.isNaN(value))) {
+    return String(time || 'N/A');
+  }
+
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const hour12 = hours % 12 || 12;
+
+  return `${hour12}:${String(minutes).padStart(2, '0')} ${period}`;
+}
 
 function buildApprovalSmsMessage(booking) {
-  const queueText = booking.queueNumber ? ` Queue: #${booking.queueNumber}.` : '';
+  const lines = [
+    'Oxford Barber: Your booking is confirmed.',
+    `Name: ${booking.customerName || 'Customer'}`,
+    `Services: ${formatBookingServicesText(booking)}`,
+    `Date: ${booking.bookingDate || 'N/A'}`,
+    `Time: ${formatSmsTimeLabel(booking.bookingTime)}`,
+  ];
 
-  return (
-    `Oxford Barber booking confirmed for ${booking.customerName || 'customer'}. ` +
-    `Service: ${booking.serviceName || 'Booking'}. ` +
-    `Date: ${booking.bookingDate || 'N/A'}. ` +
-    `Time: ${booking.bookingTime || 'N/A'}.` +
-    queueText
-  );
+  if (booking.queueNumber) {
+    lines.push(`Queue: #${booking.queueNumber}`);
+  }
+
+  return lines.join('\n');
 }
 
 function buildReminderSmsMessage(booking) {
-  const queueText = booking.queueNumber ? ` Queue: #${booking.queueNumber}.` : '';
+  const lines = [
+    'Oxford Barber reminder:',
+    `${booking.customerName || 'Customer'}, this is a reminder for your appointment.`,
+    `Services: ${formatBookingServicesText(booking)}`,
+    `Date: ${booking.bookingDate || 'N/A'}`,
+    `Time: ${formatSmsTimeLabel(booking.bookingTime)}`,
+  ];
 
-  return (
-    `Reminder from Oxford Barber for ${booking.customerName || 'customer'}. ` +
-    `Service: ${booking.serviceName || 'Booking'}. ` +
-    `Date: ${booking.bookingDate || 'N/A'}. ` +
-    `Time: ${booking.bookingTime || 'N/A'}.` +
-    queueText
-  );
+  if (booking.queueNumber) {
+    lines.push(`Queue: #${booking.queueNumber}`);
+  }
+
+  return lines.join('\n');
 }
 
 async function assertAdminRequest(req) {
@@ -126,24 +180,62 @@ function normalizeAustralianPhoneNumber(phone) {
 }
 
 function getSydneyNow() {
-  return new Date(
-    new Date().toLocaleString('en-US', { timeZone: 'Australia/Sydney' })
-  );
+  return new Date();
 }
 
-function getAppointmentDateTime(booking) {
-  if (!booking.bookingDate || !booking.bookingTime) return null;
+function getSydneyNowParts(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = formatter.formatToParts(date);
+  const read = (type) =>
+    Number(parts.find((part) => part.type === type)?.value || 0);
 
-  const [year, month, day] = booking.bookingDate.split('-').map(Number);
-  const [hours, minutes] = booking.bookingTime.split(':').map(Number);
+  return {
+    year: read('year'),
+    month: read('month'),
+    day: read('day'),
+    hour: read('hour'),
+    minute: read('minute'),
+  };
+}
 
-  if (
-    [year, month, day, hours, minutes].some((value) => Number.isNaN(value))
-  ) {
+function getSydneyDateStringFromParts(parts) {
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(
+    parts.day
+  ).padStart(2, '0')}`;
+}
+
+function shiftDateString(dateString, days) {
+  if (!dateString || !Number.isFinite(days)) return '';
+
+  const [year, month, day] = dateString.split('-').map(Number);
+
+  if ([year, month, day].some((value) => Number.isNaN(value))) {
+    return '';
+  }
+
+  const utcDate = new Date(Date.UTC(year, month - 1, day + days, 12));
+
+  return `${utcDate.getUTCFullYear()}-${String(
+    utcDate.getUTCMonth() + 1
+  ).padStart(2, '0')}-${String(utcDate.getUTCDate()).padStart(2, '0')}`;
+}
+
+function getTimeMinutes(time) {
+  const [hours, minutes] = String(time || '').split(':').map(Number);
+
+  if ([hours, minutes].some((value) => Number.isNaN(value))) {
     return null;
   }
 
-  return new Date(year, month - 1, day, hours, minutes, 0, 0);
+  return hours * 60 + minutes;
 }
 
 function isRecentReminderLock(value, now) {
@@ -158,6 +250,7 @@ function isRecentReminderLock(value, now) {
 
 exports.sendBookingApprovedSms = onRequest(
   {
+    region: 'australia-southeast1',
     cors: true,
     secrets: [twilioAccountSid, twilioAuthToken, twilioFromNumber],
   },
@@ -192,6 +285,7 @@ exports.sendBookingApprovedSms = onRequest(
 
 exports.handleAdminBookingAction = onRequest(
   {
+    region: 'australia-southeast1',
     cors: true,
     secrets: [twilioAccountSid, twilioAuthToken, twilioFromNumber],
   },
@@ -307,6 +401,10 @@ exports.sendBookingReminderSms = onSchedule(
   },
   async () => {
     const now = getSydneyNow();
+    const nowParts = getSydneyNowParts(now);
+    const currentDate = getSydneyDateStringFromParts(nowParts);
+    const tomorrowDate = shiftDateString(currentDate, 1);
+    const currentMinutes = nowParts.hour * 60 + nowParts.minute;
     const snapshot = await admin
       .firestore()
       .collection('bookings')
@@ -336,16 +434,20 @@ exports.sendBookingReminderSms = onSchedule(
           return;
         }
 
-        const appointmentDateTime = getAppointmentDateTime(booking);
+        const appointmentMinutes = getTimeMinutes(booking.bookingTime);
 
-        if (!appointmentDateTime) {
+        if (!booking.bookingDate || appointmentMinutes === null) {
           return;
         }
 
-        const timeUntilAppointment =
-          appointmentDateTime.getTime() - now.getTime();
+        const isLaterToday =
+          booking.bookingDate === currentDate &&
+          appointmentMinutes > currentMinutes;
+        const isWithinNextDayWindow =
+          booking.bookingDate === tomorrowDate &&
+          appointmentMinutes <= currentMinutes;
 
-        if (timeUntilAppointment <= 0 || timeUntilAppointment > REMINDER_WINDOW_MS) {
+        if (!isLaterToday && !isWithinNextDayWindow) {
           return;
         }
 
