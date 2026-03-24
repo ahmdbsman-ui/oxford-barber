@@ -1,0 +1,9 @@
+<svg width="2732" height="2732" viewBox="0 0 2732 2732" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="2732" height="2732" fill="#101010"/>
+  <circle cx="1366" cy="1366" r="520" fill="#161616" stroke="#D6A748" stroke-width="36"/>
+  <path d="M1158 980H1574L1710 1116V1618L1574 1754H1158L1022 1618V1116L1158 980Z" fill="#D6A748"/>
+  <path d="M1242 1134H1490L1566 1210V1524L1490 1600H1242L1166 1524V1210L1242 1134Z" fill="#101010"/>
+  <path d="M1260 764H1472V940H1260V764Z" fill="#D6A748"/>
+  <path d="M1248 1794H1484V1938H1248V1794Z" fill="#D6A748"/>
+  <text x="1366" y="2128" fill="#F7F1E3" font-family="Segoe UI, Arial, sans-serif" font-size="122" font-weight="700" text-anchor="middle">Oxford Barber Admin</text>
+</svg>

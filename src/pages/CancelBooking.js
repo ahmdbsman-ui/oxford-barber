@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { db } from '../firebase/config';
+import { getSydneyNow } from '../utils/businessStatus';
 
 async function sendTelegramCancellationNotification(booking) {
   const botToken = process.env.REACT_APP_TELEGRAM_BOT_TOKEN;
@@ -76,7 +77,7 @@ export default function CancelBooking() {
       const booking = bookingDoc.data();
       const createdAtMs = new Date(booking.createdAt).getTime();
 
-      if (!createdAtMs || Date.now() - createdAtMs > CANCELLATION_WINDOW_MS) {
+      if (!createdAtMs || getSydneyNow().getTime() - createdAtMs > CANCELLATION_WINDOW_MS) {
         setErrorMessage(
           'Cancellation is no longer allowed after 3 hours from booking creation.'
         );

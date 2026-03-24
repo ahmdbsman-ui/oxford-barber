@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useBookings } from './hooks/useBookings';
 import { useAdminAuth } from './hooks/useAdminAuth';
@@ -16,6 +16,10 @@ import {
   deleteBooking,
   runSharedBookingStatusAction,
 } from './services/bookings';
+import {
+  ensureNativeNotificationPermission,
+  showNewBookingNativeNotification,
+} from './services/nativeNotifications';
 
 export default function App() {
   const {
@@ -41,9 +45,27 @@ export default function App() {
   );
   const [actionError, setActionError] = useState('');
   const [actionLoadingId, setActionLoadingId] = useState('');
+  const nativeNotifiedBookingIdsRef = useRef(new Set());
+
+  useEffect(() => {
+    if (!isAuthenticatedAdmin) return undefined;
+
+    ensureNativeNotificationPermission().catch((error) => {
+      console.error('Admin app notification permission request failed:', error);
+    });
+
+    return undefined;
+  }, [isAuthenticatedAdmin]);
 
   useEffect(() => {
     if (!newBookingNotification) return undefined;
+
+    if (!nativeNotifiedBookingIdsRef.current.has(newBookingNotification.id)) {
+      nativeNotifiedBookingIdsRef.current.add(newBookingNotification.id);
+      showNewBookingNativeNotification(newBookingNotification).catch((error) => {
+        console.error('Admin app native booking notification failed:', error);
+      });
+    }
 
     const timeoutId = window.setTimeout(() => {
       dismissNewBookingNotification();

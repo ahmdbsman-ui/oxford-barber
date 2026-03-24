@@ -1,13 +1,14 @@
 # Android app resources
 
-Place future Capacitor app artwork in this folder.
+This folder now contains placeholder source artwork for the Android app package:
+- `icon-foreground.svg`
+- `splash.svg`
 
-Suggested placeholders to add later:
-- `icon.png` for the app icon source
-- `splash.png` for the splash source
-
-Recommended source sizes:
+Recommended export targets when you replace these placeholders:
 - Icon source: at least 1024x1024
 - Splash source: at least 2732x2732
 
-After adding artwork, generate/update native assets with your preferred Capacitor asset workflow before shipping.
+Suggested next step before a release build:
+1. Replace these placeholders with final branding artwork.
+2. Generate/update native Android assets with your preferred Capacitor asset workflow.
+3. Run `npm run build:android` and then open Android Studio.

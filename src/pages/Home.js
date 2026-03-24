@@ -1,16 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
-import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
+import { collection, doc, getDocs, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
+import { getCurrentBusinessStatus } from '../utils/businessStatus';
 
 const SERVICES = [
   { id: 1, num: '01', name: 'Beard Trim', price: 25, duration: '20 min', desc: 'Clean shaping and detailing for a sharp beard.' },
   { id: 2, num: '02', name: 'Buzz Cut', price: 25, duration: '20 min', desc: 'Simple, clean and low-maintenance cut.' },
   { id: 3, num: '03', name: 'Regular Hair Cut', price: 40, duration: '30 min', desc: 'Classic haircut tailored to your style.' },
-  { id: 4, num: '04', name: 'Zero Fade', price: 45, duration: '35 min', desc: 'Sharp fade with clean blending.' },
-  { id: 5, num: '05', name: 'Skin Fade', price: 50, duration: '45 min', desc: 'Premium fade with detailed finish.' },
-  { id: 6, num: '06', name: 'Scissor Cut', price: 50, duration: '45 min', desc: 'Scissor-only cut for natural shape.' },
+  { id: 4, num: '04', name: 'Zero Fade', price: 45, duration: '30 min', desc: 'Sharp fade with clean blending.' },
+  { id: 5, num: '05', name: 'Skin Fade', price: 50, duration: '30 min', desc: 'Premium fade with detailed finish.' },
+  { id: 6, num: '06', name: 'Scissor Cut', price: 50, duration: '30 min', desc: 'Scissor-only cut for natural shape.' },
 ];
 
 export default function Home() {
@@ -23,7 +24,6 @@ export default function Home() {
     .map((email) => email.trim())
     .filter(Boolean);
   const navigate = useNavigate();
-  const [isOpen, setIsOpen] = useState(false);
   const [tapCount, setTapCount] = useState(0);
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
@@ -36,48 +36,64 @@ export default function Home() {
     experience: '8+',
     vacationMode: false,
   });
+  const [scheduledClosures, setScheduledClosures] = useState([]);
+  const [statusTick, setStatusTick] = useState(0);
   const pressTimer = useRef(null);
 
   useEffect(() => {
-    const now = new Date();
-    const sydneyNow = new Date(
-      now.toLocaleString('en-US', { timeZone: 'Australia/Sydney' })
-    );
+    const intervalId = window.setInterval(() => {
+      setStatusTick((current) => current + 1);
+    }, 60000);
 
-    const day = sydneyNow.getDay();
-    const h = sydneyNow.getHours();
-    const m = sydneyNow.getMinutes();
-    const t = h * 60 + m;
-
-    let open = false;
-
-    if (day >= 1 && day <= 3) open = t >= 540 && t < 1080; // Mon-Wed 9-6
-    else if (day === 4) open = t >= 540 && t < 1140; // Thu 9-7
-    else if (day === 5) open = t >= 540 && t < 1080; // Fri 9-6
-    else if (day === 6) open = t >= 540 && t < 1020; // Sat 9-5
-    else open = false; // Sun closed
-
-    setIsOpen(open);
+    return () => window.clearInterval(intervalId);
   }, []);
 
-  useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const ref = doc(db, 'siteConfig', 'settings');
-        const snapshot = await getDoc(ref);
+  const businessStatus = useMemo(
+    () =>
+      getCurrentBusinessStatus({
+        vacationMode: Boolean(siteSettings.vacationMode),
+        scheduledClosures,
+      }),
+    [scheduledClosures, siteSettings.vacationMode, statusTick]
+  );
 
+  const businessStatusDebugText = businessStatus.reason || 'unknown_status';
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      doc(db, 'siteConfig', 'settings'),
+      (snapshot) => {
         if (snapshot.exists()) {
           setSiteSettings((prev) => ({
             ...prev,
             ...snapshot.data(),
           }));
         }
-      } catch (error) {
-        console.error('Error fetching site settings:', error);
+      },
+      (error) => {
+        console.error('Error listening to site settings:', error);
       }
-    };
+    );
 
-    fetchSettings();
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, 'scheduledClosures'),
+      (snapshot) => {
+        const nextClosures = snapshot.docs.map((item) => ({
+          id: item.id,
+          ...item.data(),
+        }));
+        setScheduledClosures(nextClosures);
+      },
+      (error) => {
+        console.error('Error listening to scheduled closures:', error);
+      }
+    );
+
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -119,6 +135,7 @@ export default function Home() {
   }, []);
 
   const handleBook = (svc) => {
+    localStorage.setItem('selectedServices', JSON.stringify([svc]));
     localStorage.setItem('selectedService', JSON.stringify(svc));
     navigate('/booking');
   };
@@ -692,11 +709,11 @@ export default function Home() {
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '8px',
-                color: isOpen ? '#58E08D' : '#FF5A5A',
-                background: isOpen
+                color: businessStatus.isOpen ? '#58E08D' : '#FF5A5A',
+                background: businessStatus.isOpen
                   ? 'rgba(88,224,141,0.08)'
                   : 'rgba(255,90,90,0.08)',
-                border: isOpen
+                border: businessStatus.isOpen
                   ? '1px solid rgba(88,224,141,0.24)'
                   : '1px solid rgba(255,90,90,0.24)',
                 padding: '10px 16px',
@@ -709,7 +726,17 @@ export default function Home() {
               }}
             >
               <span style={{ fontSize: '1.1rem' }}>●</span>
-              {isOpen ? 'Open Now' : 'Closed'}
+              {businessStatus.isOpen ? 'Open Now' : 'Closed'}
+              <span
+                style={{
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  opacity: 0.82,
+                  letterSpacing: '0.04em',
+                }}
+              >
+                {businessStatusDebugText}
+              </span>
             </div>
 
             <div
@@ -739,7 +766,7 @@ export default function Home() {
                 zIndex: 1,
               }}
             >
-              Sydney, NSW
+              Darlinghurst, NSW 2010
             </div>
 
             <div
@@ -750,7 +777,7 @@ export default function Home() {
                 zIndex: 1,
               }}
             >
-              Est. 2017 • Oxford Street
+              Est. 2017 • Shop 5 113-115 Oxford Street
             </div>
 
             <div
@@ -842,9 +869,9 @@ export default function Home() {
                     lineHeight: 1.5,
                   }}
                 >
-                  Oxford Street
+                  Shop 5 113-115 Oxford Street
                   <br />
-                  Sydney NSW
+                  Darlinghurst NSW 2010
                 </div>
               </div>
             </div>
@@ -877,14 +904,14 @@ export default function Home() {
             'Zero Fade',
             'Skin Fade',
             'Scissor Cut',
-            'Oxford Street Sydney',
+            'Shop 5 113-115 Oxford Street Darlinghurst NSW 2010',
             'Beard Trim',
             'Buzz Cut',
             'Regular Hair Cut',
             'Zero Fade',
             'Skin Fade',
             'Scissor Cut',
-            'Oxford Street Sydney',
+            'Shop 5 113-115 Oxford Street Darlinghurst NSW 2010',
           ].map((item, index) => (
             <span
               key={`${item}-${index}`}
@@ -1338,7 +1365,9 @@ export default function Home() {
       )}
 
       <a
-        href="https://wa.me/61400000000"
+        href="https://wa.me/61432271141"
+        aria-label="WhatsApp +61 432 271 141"
+        title="+61 432 271 141"
         target="_blank"
         rel="noreferrer"
         style={{

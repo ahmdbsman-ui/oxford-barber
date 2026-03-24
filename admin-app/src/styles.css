@@ -154,6 +154,11 @@ input {
   gap: 18px;
 }
 
+.form-panel {
+  display: grid;
+  gap: 16px;
+}
+
 .panel {
   padding: 22px;
   border-radius: 24px;
@@ -173,6 +178,136 @@ input {
 .panel h1,
 .panel h2 {
   margin: 0 0 10px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.form-field {
+  display: grid;
+  gap: 8px;
+  color: #f7f1e3;
+  font-weight: 600;
+}
+
+.form-input {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #f7f1e3;
+}
+
+.form-textarea {
+  resize: vertical;
+}
+
+.action-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.primary-button,
+.ghost-button,
+.status-toggle {
+  border-radius: 999px;
+  padding: 12px 18px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.primary-button {
+  border: none;
+  background: linear-gradient(135deg, #d4af37 0%, #c6a15b 55%, #b88b2a 100%);
+  color: #0b0b0b;
+}
+
+.primary-button:disabled,
+.ghost-button:disabled,
+.status-toggle:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ghost-button {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f7f1e3;
+}
+
+.ghost-button.danger,
+.status-toggle.danger {
+  background: rgba(211, 93, 93, 0.16);
+  color: #ff9797;
+  border: 1px solid rgba(211, 93, 93, 0.28);
+}
+
+.status-toggle.success {
+  background: rgba(61, 191, 135, 0.14);
+  color: #82efb6;
+  border: 1px solid rgba(61, 191, 135, 0.26);
+}
+
+.status-toggle.full-width {
+  width: 100%;
+}
+
+.setting-toggle-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.entity-list {
+  display: grid;
+  gap: 14px;
+}
+
+.entity-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.entity-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.entity-main span {
+  color: #cbbfa2;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.button-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.entity-image {
+  width: min(100%, 220px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  object-fit: cover;
 }
 
 .stats-grid {
@@ -473,6 +608,12 @@ input {
 
   .in-app-toast {
     flex-direction: column;
+  }
+
+  .entity-card,
+  .setting-toggle-card {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .history-row {

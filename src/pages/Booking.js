@@ -8,61 +8,59 @@ import {
 import {
   collection,
   doc,
-  getDoc,
   getDocs,
+  onSnapshot,
   query,
   runTransaction,
   where,
 } from 'firebase/firestore';
 import { db, phoneAuth } from '../firebase/config';
+import {
+  formatBusinessDateLabel,
+  formatBusinessTimeLabel,
+  getBusinessDayOfWeek,
+  getBusinessHours,
+  getFullDayClosureForDate,
+  getPartialDayClosuresForDate,
+  getSydneyNowMinutes,
+  getSydneyTodayDateString,
+  isBusinessToday,
+  timeToMinutes,
+} from '../utils/businessStatus';
 
 const SERVICES = [
   { id: 1, name: 'Beard Trim', price: 25, duration: 20, desc: 'Clean shaping and detailing for a sharp beard.' },
   { id: 2, name: 'Buzz Cut', price: 25, duration: 20, desc: 'Simple, clean and low-maintenance cut.' },
   { id: 3, name: 'Regular Hair Cut', price: 40, duration: 30, desc: 'Classic haircut tailored to your style.' },
-  { id: 4, name: 'Zero Fade', price: 45, duration: 35, desc: 'Sharp fade with clean blending.' },
-  { id: 5, name: 'Skin Fade', price: 50, duration: 45, desc: 'Premium fade with detailed finish.' },
-  { id: 6, name: 'Scissor Cut', price: 50, duration: 45, desc: 'Scissor-only cut for natural shape.' },
+  { id: 4, name: 'Zero Fade', price: 45, duration: 30, desc: 'Sharp fade with clean blending.' },
+  { id: 5, name: 'Skin Fade', price: 50, duration: 30, desc: 'Premium fade with detailed finish.' },
+  { id: 6, name: 'Scissor Cut', price: 50, duration: 30, desc: 'Scissor-only cut for natural shape.' },
 ];
 
-function getTodaySydneyDate() {
-  const sydneyNow = new Date(
-    new Date().toLocaleString('en-US', { timeZone: 'Australia/Sydney' })
+function getSelectedServiceNames(services) {
+  return services.map((service) => service.name).join(', ');
+}
+
+function closureBlocksTime(closure, bookingTime, bookingDuration) {
+  if (!closure?.startTime || !closure?.endTime || !bookingTime || !bookingDuration) {
+    return false;
+  }
+
+  return bookingsOverlap(
+    bookingTime,
+    bookingDuration,
+    closure.startTime,
+    timeToMinutes(closure.endTime) - timeToMinutes(closure.startTime)
   );
-  const year = sydneyNow.getFullYear();
-  const month = String(sydneyNow.getMonth() + 1).padStart(2, '0');
-  const day = String(sydneyNow.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 function formatDateLabel(dateString) {
-  if (!dateString) return 'Not selected';
-  return new Date(`${dateString}T00:00:00`).toLocaleDateString('en-AU', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
+  return formatBusinessDateLabel(dateString);
 }
 
 function isSunday(dateString) {
   if (!dateString) return false;
-  return new Date(`${dateString}T00:00:00`).getDay() === 0;
-}
-
-function getBusinessHours(dateString) {
-  if (!dateString) return null;
-  const day = new Date(`${dateString}T00:00:00`).getDay();
-  if (day === 0) return null;
-  if (day >= 1 && day <= 3) return { start: '09:00', end: '18:00' };
-  if (day === 4) return { start: '09:00', end: '19:00' };
-  if (day === 5) return { start: '09:00', end: '18:00' };
-  return { start: '09:00', end: '17:00' };
-}
-
-function timeToMinutes(time) {
-  const [hours, minutes] = time.split(':').map(Number);
-  return hours * 60 + minutes;
+  return getBusinessDayOfWeek(dateString) === 0;
 }
 
 function minutesToTime(totalMinutes) {
@@ -72,11 +70,7 @@ function minutesToTime(totalMinutes) {
 }
 
 function formatTimeLabel(time24) {
-  if (!time24) return 'Not selected';
-  const [hours, minutes] = time24.split(':').map(Number);
-  const date = new Date();
-  date.setHours(hours, minutes, 0, 0);
-  return date.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true });
+  return formatBusinessTimeLabel(time24);
 }
 
 function bookingsOverlap(startTimeA, durationA, startTimeB, durationB) {
@@ -235,9 +229,9 @@ const styles = {
 export default function Booking() {
   const MAX_NOTES_LENGTH = 150;
   const navigate = useNavigate();
-  const today = getTodaySydneyDate();
+  const today = getSydneyTodayDateString();
 
-  const [selectedServiceId, setSelectedServiceId] = useState(3);
+  const [selectedServiceIds, setSelectedServiceIds] = useState([3]);
   const [selectedDate, setSelectedDate] = useState(today);
   const [selectedTime, setSelectedTime] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -253,6 +247,8 @@ export default function Booking() {
   const [banCheckLoaded, setBanCheckLoaded] = useState(false);
   const [vacationMode, setVacationMode] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [scheduledClosures, setScheduledClosures] = useState([]);
+  const [closuresLoaded, setClosuresLoaded] = useState(false);
   const [verificationCode, setVerificationCode] = useState('');
   const [confirmationResult, setConfirmationResult] = useState(null);
   const [isSendingCode, setIsSendingCode] = useState(false);
@@ -261,14 +257,35 @@ export default function Booking() {
   const [verifiedPhone, setVerifiedPhone] = useState('');
   const [verificationMessage, setVerificationMessage] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [currentSydneyMinuteTick, setCurrentSydneyMinuteTick] = useState(0);
 
   useEffect(() => {
+    const savedServices = localStorage.getItem('selectedServices');
+
+    if (savedServices) {
+      try {
+        const parsedServices = JSON.parse(savedServices);
+        const parsedIds = Array.isArray(parsedServices)
+          ? parsedServices
+              .map((service) => Number(service?.id))
+              .filter((id) => SERVICES.some((service) => service.id === id))
+          : [];
+
+        if (parsedIds.length > 0) {
+          setSelectedServiceIds([...new Set(parsedIds)]);
+          return;
+        }
+      } catch (error) {
+        console.error('Failed to parse selected services:', error);
+      }
+    }
+
     const savedService = localStorage.getItem('selectedService');
     if (!savedService) return;
 
     try {
       const parsed = JSON.parse(savedService);
-      if (parsed?.id) setSelectedServiceId(parsed.id);
+      if (parsed?.id) setSelectedServiceIds([parsed.id]);
     } catch (error) {
       console.error('Failed to parse selected service:', error);
     }
@@ -319,20 +336,46 @@ export default function Booking() {
   }, [selectedDate]);
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const snapshot = await getDoc(doc(db, 'siteConfig', 'settings'));
-        if (snapshot.exists()) {
-          setVacationMode(Boolean(snapshot.data().vacationMode));
-        }
-      } catch (error) {
-        console.error('Error fetching settings:', error);
-      } finally {
+    const unsubscribe = onSnapshot(
+      doc(db, 'siteConfig', 'settings'),
+      (snapshot) => {
+        setVacationMode(Boolean(snapshot.data()?.vacationMode));
+        setSettingsLoaded(true);
+      },
+      (error) => {
+        console.error('Error listening to settings:', error);
         setSettingsLoaded(true);
       }
-    };
+    );
 
-    fetchSettings();
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, 'scheduledClosures'),
+      (snapshot) => {
+        const nextClosures = snapshot.docs
+          .map((item) => ({
+            id: item.id,
+            ...item.data(),
+          }))
+          .sort((left, right) =>
+            `${left.startDate || ''}${left.startTime || ''}`.localeCompare(
+              `${right.startDate || ''}${right.startTime || ''}`
+            )
+          );
+
+        setScheduledClosures(nextClosures);
+        setClosuresLoaded(true);
+      },
+      (error) => {
+        console.error('Error listening to scheduled closures:', error);
+        setClosuresLoaded(true);
+      }
+    );
+
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -351,18 +394,56 @@ export default function Booking() {
     fetchBannedPhones();
   }, []);
 
-  const selectedService = useMemo(
-    () => SERVICES.find((service) => service.id === selectedServiceId) || SERVICES[0],
-    [selectedServiceId]
+  const selectedServices = useMemo(
+    () => SERVICES.filter((service) => selectedServiceIds.includes(service.id)),
+    [selectedServiceIds]
   );
 
-  const availableSlots = useMemo(
-    () =>
-      selectedDate && !isSunday(selectedDate)
-        ? generateTimeSlots(selectedDate, selectedService.duration)
-        : [],
-    [selectedDate, selectedService]
+  const totalPrice = useMemo(
+    () => selectedServices.reduce((sum, service) => sum + service.price, 0),
+    [selectedServices]
   );
+
+  const totalDuration = useMemo(
+    () => selectedServices.reduce((sum, service) => sum + service.duration, 0),
+    [selectedServices]
+  );
+
+  const combinedServiceNames = useMemo(
+    () => getSelectedServiceNames(selectedServices),
+    [selectedServices]
+  );
+
+  const selectedDateFullDayClosure = useMemo(
+    () => getFullDayClosureForDate(scheduledClosures, selectedDate),
+    [scheduledClosures, selectedDate]
+  );
+
+  const selectedDatePartialClosures = useMemo(
+    () => getPartialDayClosuresForDate(scheduledClosures, selectedDate),
+    [scheduledClosures, selectedDate]
+  );
+
+  const isScheduledClosedFullDay = Boolean(selectedDateFullDayClosure);
+  const isBookingsClosed = vacationMode || isScheduledClosedFullDay;
+
+  const availableSlots = useMemo(() => {
+    if (!selectedDate || isSunday(selectedDate) || totalDuration <= 0 || isBookingsClosed) {
+      return [];
+    }
+
+    const generatedSlots = generateTimeSlots(selectedDate, totalDuration);
+
+    if (!isBusinessToday(selectedDate)) {
+      return generatedSlots;
+    }
+
+    const currentSydneyMinutes = getSydneyNowMinutes();
+
+    return generatedSlots.filter(
+      (slotTime) => timeToMinutes(slotTime) > currentSydneyMinutes
+    );
+  }, [currentSydneyMinuteTick, isBookingsClosed, selectedDate, totalDuration]);
 
   const unavailableTimes = useMemo(
     () =>
@@ -370,13 +451,16 @@ export default function Booking() {
         bookedBookings.some((booking) =>
           bookingsOverlap(
             slotTime,
-            selectedService.duration,
+            totalDuration,
             booking.bookingTime,
             booking.duration
           )
+        ) ||
+        selectedDatePartialClosures.some((closure) =>
+          closureBlocksTime(closure, slotTime, totalDuration)
         )
       ),
-    [availableSlots, bookedBookings, selectedService.duration]
+    [availableSlots, bookedBookings, selectedDatePartialClosures, totalDuration]
   );
 
   useEffect(() => {
@@ -386,12 +470,26 @@ export default function Booking() {
   }, [selectedTime, unavailableTimes]);
 
   useEffect(() => {
+    if (selectedTime && isBookingsClosed) {
+      setSelectedTime('');
+    }
+  }, [isBookingsClosed, selectedTime]);
+
+  useEffect(() => {
     return () => {
       if (window.bookingRecaptchaVerifier) {
         window.bookingRecaptchaVerifier.clear();
         window.bookingRecaptchaVerifier = null;
       }
     };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setCurrentSydneyMinuteTick((current) => current + 1);
+    }, 60000);
+
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -415,6 +513,31 @@ export default function Booking() {
     const hours = getBusinessHours(selectedDate);
     return hours ? `${formatTimeLabel(hours.start)} - ${formatTimeLabel(hours.end)}` : 'Closed';
   }, [selectedDate]);
+
+  const closureStatusMessage = useMemo(() => {
+    if (vacationMode) {
+      return 'Bookings are temporarily unavailable right now.';
+    }
+
+    if (selectedDateFullDayClosure) {
+      return selectedDateFullDayClosure.reason
+        ? `Closed: ${selectedDateFullDayClosure.reason}`
+        : 'This day is scheduled as closed.';
+    }
+
+    return '';
+  }, [selectedDateFullDayClosure, vacationMode]);
+
+  const toggleServiceSelection = (serviceId) => {
+    setSelectedServiceIds((current) => {
+      if (current.includes(serviceId)) {
+        return current.filter((id) => id !== serviceId);
+      }
+
+      return [...current, serviceId].sort((left, right) => left - right);
+    });
+    setErrorMessage('');
+  };
 
   const resetPhoneVerification = () => {
     setVerificationCode('');
@@ -567,10 +690,20 @@ export default function Booking() {
     if (isSubmitting) return;
     if (!customerName.trim()) return setErrorMessage('Please enter your name.');
     if (!phone.trim()) return setErrorMessage('Please enter your phone number.');
+    if (selectedServices.length === 0) {
+      return setErrorMessage('Please choose at least one service.');
+    }
     if (!selectedDate) return setErrorMessage('Please choose a date.');
     if (isSunday(selectedDate)) return setErrorMessage('Oxford Barber is closed on Sunday.');
     if (!selectedTime) return setErrorMessage('Please choose a time.');
     if (vacationMode) return setErrorMessage('Bookings are temporarily unavailable right now.');
+    if (isScheduledClosedFullDay) {
+      return setErrorMessage(
+        selectedDateFullDayClosure?.reason
+          ? `This date is closed: ${selectedDateFullDayClosure.reason}`
+          : 'This date is currently closed.'
+      );
+    }
 
     const normalizedPhone = normalizeAustralianMobile(phone);
     const deviceId = getDeviceIdentifier();
@@ -604,15 +737,26 @@ export default function Booking() {
         return;
       }
 
+      const selectedServicesPayload = selectedServices.map((service) => ({
+        id: service.id,
+        name: service.name,
+        price: service.price,
+        duration: service.duration,
+      }));
+
       const booking = {
         customerName: customerName.trim(),
         phone: normalizedPhone,
         notes: trimmedNotes,
         deviceId,
-        serviceId: selectedService.id,
-        serviceName: selectedService.name,
-        price: selectedService.price,
-        duration: selectedService.duration,
+        selectedServices: selectedServicesPayload,
+        serviceIds: selectedServicesPayload.map((service) => service.id),
+        serviceName: combinedServiceNames,
+        serviceNames: combinedServiceNames,
+        totalPrice,
+        totalDuration,
+        price: totalPrice,
+        duration: totalDuration,
         bookingDate: selectedDate,
         bookingTime: selectedTime,
         cancellationToken: generateCancellationToken(),
@@ -629,7 +773,7 @@ export default function Booking() {
       await sendTelegramNotification(bookingWithQueue);
 
       setSuccessMessage(
-        `Your booking request for ${selectedService.name} on ${formatDateLabel(selectedDate)} at ${formatTimeLabel(selectedTime)} has been received and is pending confirmation. Your queue number is #${queueNumber}. Your cancellation token is ${booking.cancellationToken}.`
+        `Your booking request for ${combinedServiceNames} on ${formatDateLabel(selectedDate)} at ${formatTimeLabel(selectedTime)} has been received and is pending confirmation. Your queue number is #${queueNumber}. Your cancellation token is ${booking.cancellationToken}.`
       );
       setStep(4);
     } catch (error) {
@@ -742,7 +886,7 @@ export default function Booking() {
             </div>
             <h1 style={{ fontSize: '2.3rem', margin: '0 0 12px', fontWeight: 800 }}>Book your appointment</h1>
             <p style={{ color: '#A8A8A8', lineHeight: 1.7, marginBottom: '26px' }}>
-              Choose your service, date and time, then send your request. Your booking will stay pending until approved.
+              Choose one or more services, date and time, then send your request. Your booking will stay pending until approved.
             </p>
 
             <div className="booking-step-pills" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '30px' }}>
@@ -774,12 +918,12 @@ export default function Booking() {
               <div>
                 <div className="booking-service-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
                   {SERVICES.map((service) => {
-                    const isActive = selectedServiceId === service.id;
+                    const isActive = selectedServiceIds.includes(service.id);
                     return (
                       <button
                         key={service.id}
                         type="button"
-                        onClick={() => setSelectedServiceId(service.id)}
+                        onClick={() => toggleServiceSelection(service.id)}
                         style={{
                           textAlign: 'left',
                           padding: '20px',
@@ -803,18 +947,41 @@ export default function Booking() {
                   })}
                 </div>
 
+                <div style={{ marginTop: '20px', padding: '18px', borderRadius: '18px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div style={{ color: '#C6A15B', fontWeight: 700, marginBottom: '10px' }}>Selected Services</div>
+                  {selectedServices.length === 0 ? (
+                    <div style={{ color: '#A8A8A8' }}>No services selected yet.</div>
+                  ) : (
+                    <>
+                      <div style={{ color: '#FFFFFF', lineHeight: 1.7, marginBottom: '12px' }}>{combinedServiceNames}</div>
+                      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                        <div style={{ color: '#C6A15B', fontWeight: 800 }}>Total: ${totalPrice}</div>
+                        <div style={{ color: '#DADADA', fontWeight: 700 }}>{totalDuration} minutes</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
                 <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end' }}>
                   <button
                     className="booking-primary-action"
                     type="button"
-                    disabled={!settingsLoaded || vacationMode}
+                    disabled={!settingsLoaded || !closuresLoaded || isBookingsClosed || selectedServices.length === 0}
                     onClick={() => {
+                      if (selectedServices.length === 0) {
+                        setErrorMessage('Please choose at least one service.');
+                        return;
+                      }
+                      if (isBookingsClosed) {
+                        setErrorMessage(closureStatusMessage || 'Bookings are currently unavailable.');
+                        return;
+                      }
                       setErrorMessage('');
                       setStep(2);
                     }}
-                    style={{ ...styles.primary, cursor: !settingsLoaded || vacationMode ? 'not-allowed' : 'pointer', opacity: !settingsLoaded || vacationMode ? 0.6 : 1 }}
+                    style={{ ...styles.primary, cursor: !settingsLoaded || !closuresLoaded || isBookingsClosed || selectedServices.length === 0 ? 'not-allowed' : 'pointer', opacity: !settingsLoaded || !closuresLoaded || isBookingsClosed || selectedServices.length === 0 ? 0.6 : 1 }}
                   >
-                    {!settingsLoaded ? 'Loading...' : vacationMode ? 'Bookings Unavailable' : 'Continue'}
+                    {!settingsLoaded || !closuresLoaded ? 'Loading...' : isBookingsClosed ? 'Bookings Unavailable' : 'Continue'}
                   </button>
                 </div>
               </div>
@@ -854,6 +1021,10 @@ export default function Booking() {
                     {isSunday(selectedDate) ? (
                       <div style={{ padding: '18px', borderRadius: '18px', background: 'rgba(255,90,90,0.08)', border: '1px solid rgba(255,90,90,0.22)', color: '#FF9B9B', fontWeight: 700 }}>
                         Oxford Barber is closed on Sunday.
+                      </div>
+                    ) : isBookingsClosed ? (
+                      <div style={{ padding: '18px', borderRadius: '18px', background: 'rgba(255,90,90,0.08)', border: '1px solid rgba(255,90,90,0.22)', color: '#FF9B9B', fontWeight: 700 }}>
+                        {closureStatusMessage}
                       </div>
                     ) : slotsLoading ? (
                       <div style={{ color: '#A8A8A8', padding: '12px 0' }}>Loading available times...</div>
@@ -916,6 +1087,18 @@ export default function Booking() {
                 <div className="booking-info-card" style={{ padding: '18px 18px', borderRadius: '18px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
                   <div style={{ color: '#C6A15B', fontWeight: 700, marginBottom: '6px' }}>{formatDateLabel(selectedDate)}</div>
                   <div style={{ color: '#A8A8A8' }}>Opening hours: {openingHoursLabel}</div>
+                  {selectedDatePartialClosures.length > 0 && !isScheduledClosedFullDay && (
+                    <div style={{ color: '#FFCC8A', marginTop: '8px', lineHeight: 1.6 }}>
+                      Closed times:{' '}
+                      {selectedDatePartialClosures
+                        .map((closure) =>
+                          `${formatTimeLabel(closure.startTime)} - ${formatTimeLabel(closure.endTime)}${
+                            closure.reason ? ` (${closure.reason})` : ''
+                          }`
+                        )
+                        .join(', ')}
+                    </div>
+                  )}
                 </div>
 
                 <div className="booking-action-row" style={{ paddingTop: '4px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
@@ -926,6 +1109,8 @@ export default function Booking() {
                     onClick={() => {
                       if (!selectedDate) return setErrorMessage('Please choose a date.');
                       if (isSunday(selectedDate)) return setErrorMessage('Oxford Barber is closed on Sunday.');
+                      if (isBookingsClosed) return setErrorMessage(closureStatusMessage || 'Bookings are currently unavailable.');
+                      if (selectedServices.length === 0) return setErrorMessage('Please choose at least one service.');
                       if (!selectedTime) return setErrorMessage('Please choose a time.');
                       setErrorMessage('');
                       setStep(3);
@@ -1069,12 +1254,39 @@ export default function Booking() {
               <div style={{ color: '#C6A15B', letterSpacing: '2px', textTransform: 'uppercase', fontSize: '0.78rem', fontWeight: 700, marginBottom: '12px' }}>
                 Booking Summary
               </div>
-              <div style={{ fontSize: '1.35rem', fontWeight: 800, marginBottom: '8px' }}>{selectedService.name}</div>
-              <div style={{ color: '#A8A8A8', lineHeight: 1.7, marginBottom: '18px' }}>{selectedService.desc}</div>
+              <div style={{ fontSize: '1.35rem', fontWeight: 800, marginBottom: '8px' }}>
+                {selectedServices.length > 0 ? combinedServiceNames : 'No services selected'}
+              </div>
+              <div style={{ color: '#A8A8A8', lineHeight: 1.7, marginBottom: '18px' }}>
+                {selectedServices.length > 0
+                  ? selectedServices.map((service) => service.desc).join(' ')
+                  : 'Choose one or more services to see your booking summary.'}
+              </div>
+              {selectedServices.length > 0 && (
+                <div style={{ display: 'grid', gap: '8px', marginBottom: '18px' }}>
+                  {selectedServices.map((service) => (
+                    <div
+                      key={service.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                        color: '#DADADA',
+                        background: 'rgba(255,255,255,0.03)',
+                        borderRadius: '14px',
+                        padding: '12px 14px',
+                      }}
+                    >
+                      <span>{service.name}</span>
+                      <span>${service.price}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="booking-summary-grid" style={{ display: 'grid', gap: '12px' }}>
                 {[
-                  ['Price', `$${selectedService.price}`],
-                  ['Duration', `${selectedService.duration} minutes`],
+                  ['Total Price', `$${totalPrice}`],
+                  ['Total Duration', `${totalDuration} minutes`],
                   ['Date', formatDateLabel(selectedDate)],
                   ['Time', selectedTime ? formatTimeLabel(selectedTime) : 'Not selected'],
                   ['Status', 'Pending approval'],

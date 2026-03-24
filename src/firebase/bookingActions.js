@@ -1,9 +1,12 @@
 import { auth } from './config';
 
+const defaultBookingActionFunctionUrl =
+  'https://australia-southeast1-oxford-barber-ee024.cloudfunctions.net/handleAdminBookingAction';
+
 const bookingActionFunctionUrl =
   process.env.REACT_APP_BOOKING_ACTION_FUNCTION_URL?.trim() ||
   process.env.REACT_APP_BOOKING_ADMIN_ACTION_FUNCTION_URL?.trim() ||
-  '';
+  defaultBookingActionFunctionUrl;
 
 export async function runBookingAdminAction(action, bookingId, booking) {
   if (!bookingActionFunctionUrl) {

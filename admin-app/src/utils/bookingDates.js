@@ -1,13 +1,13 @@
 const BUSINESS_TIME_ZONE = 'Australia/Sydney';
 
-export function getBusinessTodayParts() {
+export function getBusinessTodayParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: BUSINESS_TIME_ZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   });
-  const parts = formatter.formatToParts(new Date());
+  const parts = formatter.formatToParts(date);
 
   return {
     year: Number(parts.find((part) => part.type === 'year')?.value),
@@ -26,36 +26,19 @@ export function parseBookingDateParts(dateString) {
   return { year, month, day };
 }
 
+export function getBusinessTodayDateString(date = new Date()) {
+  const today = getBusinessTodayParts(date);
+  return `${today.year}-${String(today.month).padStart(2, '0')}-${String(
+    today.day
+  ).padStart(2, '0')}`;
+}
+
 export function isToday(dateString) {
-  const bookingDate = parseBookingDateParts(dateString);
-
-  if (!bookingDate) return false;
-
-  const today = getBusinessTodayParts();
-
-  return (
-    bookingDate.year === today.year &&
-    bookingDate.month === today.month &&
-    bookingDate.day === today.day
-  );
+  if (!dateString) return false;
+  return dateString === getBusinessTodayDateString();
 }
 
 export function isBeforeToday(dateString) {
-  const bookingDate = parseBookingDateParts(dateString);
-
-  if (!bookingDate) return false;
-
-  const today = getBusinessTodayParts();
-  const bookingValue = Number(
-    `${bookingDate.year}${String(bookingDate.month).padStart(2, '0')}${String(
-      bookingDate.day
-    ).padStart(2, '0')}`
-  );
-  const todayValue = Number(
-    `${today.year}${String(today.month).padStart(2, '0')}${String(
-      today.day
-    ).padStart(2, '0')}`
-  );
-
-  return bookingValue < todayValue;
+  if (!dateString) return false;
+  return dateString < getBusinessTodayDateString();
 }

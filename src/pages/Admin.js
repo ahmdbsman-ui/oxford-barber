@@ -27,20 +27,21 @@ import {
 } from 'firebase/storage';
 import { auth, db, storage } from '../firebase/config';
 import { runBookingAdminAction } from '../firebase/bookingActions';
+import { isBusinessToday } from '../utils/businessStatus';
 
-function isToday(dateString) {
-  if (!dateString) return false;
+function formatClosureDateRange(closure) {
+  if (!closure?.startDate) return 'No date';
+  if (!closure?.endDate || closure.startDate === closure.endDate) {
+    return closure.startDate;
+  }
 
-  const bookingDate = new Date(`${dateString}T00:00:00`);
-  const now = new Date(
-    new Date().toLocaleString('en-US', { timeZone: 'Australia/Sydney' })
-  );
+  return `${closure.startDate} to ${closure.endDate}`;
+}
 
-  return (
-    bookingDate.getFullYear() === now.getFullYear() &&
-    bookingDate.getMonth() === now.getMonth() &&
-    bookingDate.getDate() === now.getDate()
-  );
+function formatClosureTimeRange(closure) {
+  if (closure?.isFullDay) return 'Full day';
+  if (!closure?.startTime || !closure?.endTime) return 'Time not set';
+  return `${closure.startTime} - ${closure.endTime}`;
 }
 
 export default function Admin() {
@@ -89,6 +90,17 @@ export default function Admin() {
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
   const [notificationPromptLoading, setNotificationPromptLoading] =
     useState(false);
+  const [scheduledClosures, setScheduledClosures] = useState([]);
+  const [closuresLoading, setClosuresLoading] = useState(false);
+  const [closuresMessage, setClosuresMessage] = useState('');
+  const [closureForm, setClosureForm] = useState({
+    startDate: '',
+    endDate: '',
+    isFullDay: true,
+    startTime: '',
+    endTime: '',
+    reason: '',
+  });
   const hasInitializedBookingListener = useRef(false);
   const seenBookingIdsRef = useRef(new Set());
 
@@ -148,6 +160,31 @@ export default function Admin() {
     fetchBannedUsers();
     fetchReviews();
     fetchGalleryItems();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, 'scheduledClosures'),
+      (snapshot) => {
+        const data = snapshot.docs
+          .map((item) => ({
+            id: item.id,
+            ...item.data(),
+          }))
+          .sort((left, right) =>
+            `${left.startDate || ''}${left.startTime || ''}`.localeCompare(
+              `${right.startDate || ''}${right.startTime || ''}`
+            )
+          );
+
+        setScheduledClosures(data);
+      },
+      (error) => {
+        console.error('Error listening to scheduled closures:', error);
+      }
+    );
+
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -216,7 +253,7 @@ export default function Admin() {
 
     return {
       all: bookings.length,
-      today: bookings.filter((b) => isToday(b.bookingDate)).length,
+      today: bookings.filter((b) => isBusinessToday(b.bookingDate)).length,
       pending: bookings.filter((b) => b.status === 'pending').length,
       confirmed: bookings.filter((b) => b.status === 'confirmed').length,
       cancelled: bookings.filter((b) => b.status === 'cancelled').length,
@@ -545,6 +582,70 @@ export default function Admin() {
       );
     } finally {
       setSettingsLoading(false);
+    }
+  };
+
+  const addScheduledClosure = async () => {
+    if (!closureForm.startDate || !closureForm.endDate) {
+      setClosuresMessage('Please set both start and end dates.');
+      return;
+    }
+
+    if (closureForm.endDate < closureForm.startDate) {
+      setClosuresMessage('End date cannot be before start date.');
+      return;
+    }
+
+    if (!closureForm.isFullDay) {
+      if (!closureForm.startTime || !closureForm.endTime) {
+        setClosuresMessage('Please set both start and end times.');
+        return;
+      }
+
+      if (closureForm.endTime <= closureForm.startTime) {
+        setClosuresMessage('End time must be after start time.');
+        return;
+      }
+    }
+
+    try {
+      setClosuresLoading(true);
+      setClosuresMessage('');
+
+      await addDoc(collection(db, 'scheduledClosures'), {
+        startDate: closureForm.startDate,
+        endDate: closureForm.endDate,
+        isFullDay: closureForm.isFullDay,
+        startTime: closureForm.isFullDay ? '' : closureForm.startTime,
+        endTime: closureForm.isFullDay ? '' : closureForm.endTime,
+        reason: closureForm.reason.trim(),
+        createdAt: new Date().toISOString(),
+      });
+
+      setClosureForm({
+        startDate: '',
+        endDate: '',
+        isFullDay: true,
+        startTime: '',
+        endTime: '',
+        reason: '',
+      });
+      setClosuresMessage('Scheduled closure saved successfully.');
+    } catch (error) {
+      console.error('Error adding scheduled closure:', error);
+      setClosuresMessage('Failed to save scheduled closure.');
+    } finally {
+      setClosuresLoading(false);
+    }
+  };
+
+  const deleteScheduledClosure = async (closureId) => {
+    try {
+      await deleteDoc(doc(db, 'scheduledClosures', closureId));
+      setClosuresMessage('Scheduled closure deleted.');
+    } catch (error) {
+      console.error('Error deleting scheduled closure:', error);
+      setClosuresMessage('Failed to delete scheduled closure.');
     }
   };
 
@@ -1176,7 +1277,7 @@ export default function Admin() {
                 fontWeight: 800,
               }}
             >
-              Homepage stats & vacation mode
+              Homepage stats, closures & vacation mode
             </h2>
 
             <div
@@ -1361,6 +1462,301 @@ export default function Admin() {
                     style={adminInputStyle}
                   />
                 </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '20px',
+                padding: '18px',
+                marginBottom: '20px',
+              }}
+            >
+              <div style={{ fontWeight: 800, marginBottom: '8px' }}>
+                Scheduled Closures
+              </div>
+              <div
+                style={{
+                  color: '#A8A8A8',
+                  marginBottom: '16px',
+                  lineHeight: 1.7,
+                }}
+              >
+                Add full-day or partial-day closures. The booking page will react
+                live and block only the affected dates or time ranges.
+              </div>
+
+              <div style={{ ...adminFormGridStyle, marginBottom: '16px' }}>
+                <div style={adminFieldStyle}>
+                  <label
+                    style={{
+                      display: 'block',
+                      marginBottom: '8px',
+                      color: '#DADADA',
+                      fontWeight: 700,
+                    }}
+                  >
+                    Start Date
+                  </label>
+                  <input
+                    type="date"
+                    value={closureForm.startDate}
+                    onChange={(e) =>
+                      setClosureForm((prev) => ({
+                        ...prev,
+                        startDate: e.target.value,
+                      }))
+                    }
+                    style={adminInputStyle}
+                  />
+                </div>
+
+                <div style={adminFieldStyle}>
+                  <label
+                    style={{
+                      display: 'block',
+                      marginBottom: '8px',
+                      color: '#DADADA',
+                      fontWeight: 700,
+                    }}
+                  >
+                    End Date
+                  </label>
+                  <input
+                    type="date"
+                    value={closureForm.endDate}
+                    onChange={(e) =>
+                      setClosureForm((prev) => ({
+                        ...prev,
+                        endDate: e.target.value,
+                      }))
+                    }
+                    style={adminInputStyle}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    ...adminFieldStyle,
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setClosureForm((prev) => ({
+                        ...prev,
+                        isFullDay: !prev.isFullDay,
+                      }))
+                    }
+                    style={{
+                      width: '100%',
+                      background: closureForm.isFullDay
+                        ? 'rgba(255,90,90,0.12)'
+                        : 'rgba(88,224,141,0.12)',
+                      color: closureForm.isFullDay ? '#FF8E8E' : '#7EF0AA',
+                      border: closureForm.isFullDay
+                        ? '1px solid rgba(255,90,90,0.22)'
+                        : '1px solid rgba(88,224,141,0.22)',
+                      borderRadius: '16px',
+                      padding: '14px 16px',
+                      cursor: 'pointer',
+                      fontWeight: 800,
+                    }}
+                  >
+                    {closureForm.isFullDay
+                      ? 'Full-Day Closure'
+                      : 'Partial-Day Closure'}
+                  </button>
+                </div>
+              </div>
+
+              {!closureForm.isFullDay && (
+                <div style={{ ...adminFormGridStyle, marginBottom: '16px' }}>
+                  <div style={adminFieldStyle}>
+                    <label
+                      style={{
+                        display: 'block',
+                        marginBottom: '8px',
+                        color: '#DADADA',
+                        fontWeight: 700,
+                      }}
+                    >
+                      Start Time
+                    </label>
+                    <input
+                      type="time"
+                      value={closureForm.startTime}
+                      onChange={(e) =>
+                        setClosureForm((prev) => ({
+                          ...prev,
+                          startTime: e.target.value,
+                        }))
+                      }
+                      style={adminInputStyle}
+                    />
+                  </div>
+
+                  <div style={adminFieldStyle}>
+                    <label
+                      style={{
+                        display: 'block',
+                        marginBottom: '8px',
+                        color: '#DADADA',
+                        fontWeight: 700,
+                      }}
+                    >
+                      End Time
+                    </label>
+                    <input
+                      type="time"
+                      value={closureForm.endTime}
+                      onChange={(e) =>
+                        setClosureForm((prev) => ({
+                          ...prev,
+                          endTime: e.target.value,
+                        }))
+                      }
+                      style={adminInputStyle}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div style={adminFieldStyle}>
+                <label
+                  style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    color: '#DADADA',
+                    fontWeight: 700,
+                  }}
+                >
+                  Reason (optional)
+                </label>
+                <input
+                  type="text"
+                  value={closureForm.reason}
+                  onChange={(e) =>
+                    setClosureForm((prev) => ({
+                      ...prev,
+                      reason: e.target.value,
+                    }))
+                  }
+                  placeholder="Public holiday, maintenance, private event..."
+                  style={adminInputStyle}
+                />
+              </div>
+
+              <div
+                style={{
+                  marginTop: '16px',
+                  display: 'flex',
+                  justifyContent: 'flex-start',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={addScheduledClosure}
+                  disabled={closuresLoading}
+                  style={{
+                    background:
+                      'linear-gradient(135deg, #D4AF37 0%, #C6A15B 55%, #B88B2A 100%)',
+                    color: '#0B0B0B',
+                    border: 'none',
+                    borderRadius: '999px',
+                    padding: '14px 22px',
+                    fontWeight: 800,
+                    cursor: closuresLoading ? 'not-allowed' : 'pointer',
+                    opacity: closuresLoading ? 0.7 : 1,
+                  }}
+                >
+                  {closuresLoading ? 'Saving Closure...' : 'Add Closure'}
+                </button>
+              </div>
+
+              {closuresMessage && (
+                <div
+                  style={{
+                    marginTop: '16px',
+                    color:
+                      closuresMessage.includes('Failed') ||
+                      closuresMessage.includes('Please')
+                        ? '#FF8E8E'
+                        : '#7EF0AA',
+                    fontWeight: 700,
+                  }}
+                >
+                  {closuresMessage}
+                </div>
+              )}
+
+              <div style={{ display: 'grid', gap: '12px', marginTop: '20px' }}>
+                {scheduledClosures.length === 0 ? (
+                  <div style={{ color: '#A8A8A8' }}>
+                    No scheduled closures saved yet.
+                  </div>
+                ) : (
+                  scheduledClosures.map((closure) => (
+                    <div
+                      key={closure.id}
+                      style={{
+                        background: 'rgba(255,255,255,0.03)',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        borderRadius: '18px',
+                        padding: '16px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: '16px',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <div>
+                        <div
+                          style={{
+                            color: '#C6A15B',
+                            fontWeight: 800,
+                            marginBottom: '6px',
+                          }}
+                        >
+                          {formatClosureDateRange(closure)}
+                        </div>
+                        <div
+                          style={{
+                            color: '#FFFFFF',
+                            fontWeight: 700,
+                            marginBottom: '4px',
+                          }}
+                        >
+                          {formatClosureTimeRange(closure)}
+                        </div>
+                        <div style={{ color: '#A8A8A8' }}>
+                          {closure.reason || 'No reason provided'}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => deleteScheduledClosure(closure.id)}
+                        style={{
+                          background: 'rgba(255,90,90,0.12)',
+                          color: '#FF8E8E',
+                          border: '1px solid rgba(255,90,90,0.22)',
+                          borderRadius: '999px',
+                          padding: '12px 18px',
+                          cursor: 'pointer',
+                          fontWeight: 800,
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
