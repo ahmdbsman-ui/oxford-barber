@@ -37,18 +37,18 @@ export default function Home() {
     vacationMode: false,
   });
   const [scheduledClosures, setScheduledClosures] = useState([]);
-  const [statusTick, setStatusTick] = useState(0);
+  const [currentBusinessStatusTime, setCurrentBusinessStatusTime] = useState(
+    () => new Date()
+  );
   const pressTimer = useRef(null);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
-      setStatusTick((current) => current + 1);
+      setCurrentBusinessStatusTime(new Date());
     }, 60000);
 
     return () => window.clearInterval(intervalId);
   }, []);
-
-  const currentBusinessStatusTime = useMemo(() => new Date(), [statusTick]);
 
   const businessStatus = useMemo(
     () =>

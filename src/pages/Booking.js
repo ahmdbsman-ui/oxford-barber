@@ -257,7 +257,9 @@ export default function Booking() {
   const [verifiedPhone, setVerifiedPhone] = useState('');
   const [verificationMessage, setVerificationMessage] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
-  const [currentSydneyMinuteTick, setCurrentSydneyMinuteTick] = useState(0);
+  const [currentSydneyMinutes, setCurrentSydneyMinutes] = useState(() =>
+    getSydneyNowMinutes()
+  );
 
   useEffect(() => {
     const savedServices = localStorage.getItem('selectedServices');
@@ -484,16 +486,11 @@ export default function Booking() {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setCurrentSydneyMinuteTick((current) => current + 1);
+      setCurrentSydneyMinutes(getSydneyNowMinutes());
     }, 60000);
 
     return () => window.clearInterval(timer);
   }, []);
-
-  const currentSydneyMinutes = useMemo(
-    () => getSydneyNowMinutes(),
-    [currentSydneyMinuteTick]
-  );
 
   useEffect(() => {
     if (resendCooldown <= 0) return undefined;
