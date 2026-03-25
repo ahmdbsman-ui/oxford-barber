@@ -395,6 +395,7 @@ exports.handleAdminBookingAction = onRequest(
 
 exports.sendBookingReminderSms = onSchedule(
   {
+    region: 'australia-southeast1',
     schedule: 'every 60 minutes',
     timeZone: 'Australia/Sydney',
     secrets: [twilioAccountSid, twilioAuthToken, twilioFromNumber],

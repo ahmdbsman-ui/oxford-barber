@@ -81,8 +81,26 @@ export function useAdminAuth() {
 
       return { ok: true };
     } catch (error) {
-      console.error('Admin app login failed:', error);
-      setAuthError('Invalid admin email or password.');
+      const authCode = error?.code || 'unknown';
+      const authMessage = error?.message || 'Unknown Firebase auth error';
+
+      console.error('Admin app login failed:', {
+        email: normalizedEmail,
+        code: authCode,
+        message: authMessage,
+      });
+
+      if (
+        authCode === 'auth/invalid-credential' ||
+        authCode === 'auth/wrong-password' ||
+        authCode === 'auth/user-not-found' ||
+        authCode === 'auth/invalid-login-credentials'
+      ) {
+        setAuthError('Invalid admin email or password.');
+      } else {
+        setAuthError(`Admin login failed: ${authCode}`);
+      }
+
       return { ok: false };
     }
   };

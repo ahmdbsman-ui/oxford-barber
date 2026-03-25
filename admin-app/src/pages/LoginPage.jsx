@@ -45,10 +45,16 @@ export default function LoginPage({
           </label>
           <input
             autoComplete="email"
+            autoCapitalize="none"
+            autoCorrect="off"
             className="login-input"
             id="admin-email"
-            onChange={(event) => setEmail(event.target.value)}
+            inputMode="email"
+            onChange={(event) =>
+              setEmail(event.target.value.replace(/\s+/g, ''))
+            }
             placeholder="owner@email.com"
+            spellCheck={false}
             type="email"
             value={email}
           />
@@ -58,10 +64,13 @@ export default function LoginPage({
           </label>
           <input
             autoComplete="current-password"
+            autoCapitalize="none"
+            autoCorrect="off"
             className="login-input"
             id="admin-password"
             onChange={(event) => setPassword(event.target.value)}
             placeholder="Enter password"
+            spellCheck={false}
             type="password"
             value={password}
           />
