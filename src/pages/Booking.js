@@ -37,6 +37,8 @@ const SERVICES = [
   { id: 6, name: 'Scissor Cut', price: 50, duration: 30, desc: 'Scissor-only cut for natural shape.' },
 ];
 
+const SAME_DAY_BOOKING_LEAD_MINUTES = 120;
+
 function getSelectedServiceNames(services) {
   return services.map((service) => service.name).join(', ');
 }
@@ -441,7 +443,9 @@ export default function Booking() {
     }
 
     return generatedSlots.filter(
-      (slotTime) => timeToMinutes(slotTime) > currentSydneyMinutes
+      (slotTime) =>
+        timeToMinutes(slotTime) >=
+        currentSydneyMinutes + SAME_DAY_BOOKING_LEAD_MINUTES
     );
   }, [currentSydneyMinutes, isBookingsClosed, selectedDate, totalDuration]);
 
