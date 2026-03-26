@@ -1,7 +1,5 @@
 import {
   collection,
-  deleteDoc,
-  doc,
   onSnapshot,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
@@ -78,8 +76,4 @@ export async function runSharedBookingStatusAction(bookingId, status, booking) {
 
 export async function updateBookingStatus(bookingId, status, booking) {
   await runSharedBookingStatusAction(bookingId, status, booking);
-}
-
-export async function deleteBooking(bookingId) {
-  await deleteDoc(doc(db, 'bookings', bookingId));
 }

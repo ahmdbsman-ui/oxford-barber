@@ -13,7 +13,6 @@ import GalleryPage from './pages/GalleryPage';
 import ReviewsPage from './pages/ReviewsPage';
 import LoginPage from './pages/LoginPage';
 import {
-  deleteBooking,
   runSharedBookingStatusAction,
 } from './services/bookings';
 import {
@@ -101,10 +100,6 @@ export default function App() {
     );
   };
 
-  const handleDelete = async (bookingId) => {
-    await runBookingAction(bookingId, () => deleteBooking(bookingId));
-  };
-
   return (
     <Routes>
       <Route
@@ -140,7 +135,6 @@ export default function App() {
                 loading={loading}
                 onApprove={handleApprove}
                 onCancel={handleCancel}
-                onDelete={handleDelete}
               />
             }
           />

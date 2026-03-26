@@ -278,19 +278,6 @@ export default function Admin() {
     }
   };
 
-  const deleteBooking = async (bookingId) => {
-    const confirmed = window.confirm('Delete this booking permanently?');
-    if (!confirmed) return;
-
-    try {
-      await deleteDoc(doc(db, 'bookings', bookingId));
-      setBookings((prev) => prev.filter((booking) => booking.id !== bookingId));
-    } catch (error) {
-      console.error('Error deleting booking:', error);
-      setErrorMessage('Failed to delete booking.');
-    }
-  };
-
   const fetchSettings = async () => {
     try {
       const ref = doc(db, 'siteConfig', 'settings');
@@ -1223,20 +1210,6 @@ export default function Admin() {
                       Cancel
                     </button>
 
-                    <button
-                      onClick={() => deleteBooking(booking.id)}
-                      style={{
-                        background: 'rgba(255,255,255,0.06)',
-                        color: '#FFFFFF',
-                        border: '1px solid rgba(255,255,255,0.12)',
-                        borderRadius: '999px',
-                        padding: '10px 16px',
-                        cursor: 'pointer',
-                        fontWeight: 700,
-                      }}
-                    >
-                      Delete
-                    </button>
                   </div>
                 </div>
               ))}

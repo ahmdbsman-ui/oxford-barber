@@ -8,7 +8,6 @@ export default function BookingsPage({
   actionLoadingId,
   onApprove,
   onCancel,
-  onDelete,
 }) {
   return (
     <div className="page-stack">
@@ -16,8 +15,8 @@ export default function BookingsPage({
         <div className="panel-kicker">Bookings</div>
         <h1>Live bookings list</h1>
         <p className="panel-copy">
-          Approve, cancel, or delete from the owner app. Firestore updates
-          immediately reflect in the website admin as well.
+          Approve or cancel from the owner app. Firestore updates immediately
+          reflect in the website admin as well.
         </p>
       </section>
 
@@ -37,7 +36,6 @@ export default function BookingsPage({
             booking={booking}
             onApprove={onApprove}
             onCancel={onCancel}
-            onDelete={onDelete}
           />
         ))}
       </div>

@@ -2,7 +2,6 @@ export default function BookingCard({
   booking,
   onApprove,
   onCancel,
-  onDelete,
   actionLoading,
 }) {
   const status = booking.status || 'pending';
@@ -53,14 +52,6 @@ export default function BookingCard({
           type="button"
         >
           {actionLoading ? 'Please wait...' : 'Cancel'}
-        </button>
-        <button
-          className="danger"
-          disabled={actionLoading}
-          onClick={() => onDelete(booking.id)}
-          type="button"
-        >
-          {actionLoading ? 'Please wait...' : 'Delete'}
         </button>
       </div>
     </article>
