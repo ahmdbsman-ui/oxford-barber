@@ -47,12 +47,13 @@ function formatClosureTimeRange(closure) {
 export default function Admin() {
   const ADMIN_NOTIFICATION_PREFERENCE_KEY =
     'oxfordAdminBrowserNotificationPreference';
+  const defaultAdminAppDownloadUrl = '/downloads/oxford-barber-admin.apk';
   const adminAppDownloadUrl = [
     process.env.REACT_APP_ADMIN_APP_DOWNLOAD_URL,
     process.env.REACT_APP_ADMIN_APP_DOWNLOAD_LINK,
   ]
     .map((value) => value?.trim())
-    .find(Boolean) || '';
+    .find(Boolean) || defaultAdminAppDownloadUrl;
   const navigate = useNavigate();
 
   const [bookings, setBookings] = useState([]);
