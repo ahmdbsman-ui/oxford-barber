@@ -43,6 +43,11 @@ function getSelectedServiceNames(services) {
   return services.map((service) => service.name).join(', ');
 }
 
+function isActiveBlockingBookingStatus(status) {
+  const normalizedStatus = String(status || '').trim().toLowerCase();
+  return normalizedStatus === 'pending' || normalizedStatus === 'confirmed';
+}
+
 function closureBlocksTime(closure, bookingTime, bookingDuration) {
   if (!closure?.startTime || !closure?.endTime || !bookingTime || !bookingDuration) {
     return false;
@@ -300,27 +305,25 @@ export default function Booking() {
   }, [selectedDate]);
 
   useEffect(() => {
-    const fetchBookedTimes = async () => {
-      if (!selectedDate || isSunday(selectedDate)) {
-        setBookedBookings([]);
-        return;
-      }
+    if (!selectedDate || isSunday(selectedDate)) {
+      setBookedBookings([]);
+      setSlotsLoading(false);
+      return undefined;
+    }
 
-      try {
-        setSlotsLoading(true);
+    setSlotsLoading(true);
 
-        const bookingsQuery = query(
-          collection(db, 'bookings'),
-          where('bookingDate', '==', selectedDate)
-        );
+    const bookingsQuery = query(
+      collection(db, 'bookings'),
+      where('bookingDate', '==', selectedDate)
+    );
 
-        const snapshot = await getDocs(bookingsQuery);
-
+    const unsubscribe = onSnapshot(
+      bookingsQuery,
+      (snapshot) => {
         const reserved = snapshot.docs
           .map((docItem) => docItem.data())
-          .filter(
-            (item) => item.status === 'pending' || item.status === 'confirmed'
-          )
+          .filter((item) => isActiveBlockingBookingStatus(item.status))
           .map((item) => ({
             bookingTime: item.bookingTime,
             duration: Number(item.duration) || 30,
@@ -328,15 +331,16 @@ export default function Booking() {
           .filter((item) => item.bookingTime);
 
         setBookedBookings(reserved);
-      } catch (error) {
-        console.error('Error fetching booked times:', error);
+        setSlotsLoading(false);
+      },
+      (error) => {
+        console.error('Error listening to booked times:', error);
         setBookedBookings([]);
-      } finally {
         setSlotsLoading(false);
       }
-    };
+    );
 
-    fetchBookedTimes();
+    return () => unsubscribe();
   }, [selectedDate]);
 
   useEffect(() => {

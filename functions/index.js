@@ -118,15 +118,49 @@ async function assertAdminRequest(req) {
   return decodedToken;
 }
 
-async function sendSmsMessage(to, body) {
-  const normalizedPhone = normalizeAustralianPhoneNumber(to);
-  const client = twilio(twilioAccountSid.value(), twilioAuthToken.value());
+function getTwilioSecretDiagnostics() {
+  const accountSid = String(twilioAccountSid.value() || '').trim();
+  const authToken = String(twilioAuthToken.value() || '').trim();
+  const fromNumber = String(twilioFromNumber.value() || '').trim();
 
-  return client.messages.create({
-    to: normalizedPhone,
-    from: twilioFromNumber.value(),
-    body,
+  return {
+    hasAccountSid: Boolean(accountSid),
+    hasAuthToken: Boolean(authToken),
+    hasFromNumber: Boolean(fromNumber),
+    accountSidStartsWithAC: accountSid.startsWith('AC'),
+    fromNumberLooksE164: /^\+\d{8,15}$/.test(fromNumber),
+  };
+}
+
+function logTwilioFailure(functionName, normalizedPhone, error) {
+  console.error(`${functionName} Twilio send failed:`, {
+    functionName,
+    normalizedPhone,
+    twilioStatus: error?.status || null,
+    twilioCode: error?.code || null,
+    twilioMessage: error?.message || 'Unknown Twilio error',
+    twilioMoreInfo: error?.moreInfo || null,
+    ...getTwilioSecretDiagnostics(),
   });
+}
+
+async function sendSmsMessage(functionName, to, body) {
+  const normalizedPhone = normalizeAustralianPhoneNumber(to);
+  const accountSid = String(twilioAccountSid.value() || '').trim();
+  const authToken = String(twilioAuthToken.value() || '').trim();
+  const fromNumber = String(twilioFromNumber.value() || '').trim();
+  const client = twilio(accountSid, authToken);
+
+  try {
+    return await client.messages.create({
+      to: normalizedPhone,
+      from: fromNumber,
+      body,
+    });
+  } catch (error) {
+    logTwilioFailure(functionName, normalizedPhone, error);
+    throw error;
+  }
 }
 
 function normalizeAustralianPhoneNumber(phone) {
@@ -271,6 +305,7 @@ exports.sendBookingApprovedSms = onRequest(
       }
 
       await sendSmsMessage(
+        'sendBookingApprovedSms',
         booking.phone,
         buildApprovalSmsMessage(booking)
       );
@@ -345,22 +380,40 @@ exports.handleAdminBookingAction = onRequest(
         if (shouldConfirm && mergedBooking.phone) {
           const normalizedPhone = normalizeAustralianPhoneNumber(mergedBooking.phone);
 
-          await sendSmsMessage(
-            normalizedPhone,
-            buildApprovalSmsMessage({
-              ...mergedBooking,
-              phone: normalizedPhone,
-              status: 'confirmed',
-            })
-          );
+          try {
+            await sendSmsMessage(
+              'handleAdminBookingAction',
+              normalizedPhone,
+              buildApprovalSmsMessage({
+                ...mergedBooking,
+                phone: normalizedPhone,
+                status: 'confirmed',
+              })
+            );
 
-          await bookingRef.set(
-            {
-              phone: normalizedPhone,
-              approvalSmsSentAt: nowIso,
-            },
-            { merge: true }
-          );
+            await bookingRef.set(
+              {
+                phone: normalizedPhone,
+                approvalSmsSentAt: nowIso,
+              },
+              { merge: true }
+            );
+          } catch (smsError) {
+            console.error('handleAdminBookingAction approval SMS failed but booking stayed confirmed:', {
+              bookingId,
+              code: smsError?.code || null,
+              status: smsError?.status || null,
+              message: smsError?.message || 'Unknown Twilio error',
+            });
+
+            await bookingRef.set(
+              {
+                phone: normalizedPhone,
+                approvalSmsFailedAt: nowIso,
+              },
+              { merge: true }
+            );
+          }
         }
 
         res.json({
@@ -471,6 +524,7 @@ exports.sendBookingReminderSms = onSchedule(
 
       try {
         await sendSmsMessage(
+          'sendBookingReminderSms',
           lockedBooking.phone,
           buildReminderSmsMessage(lockedBooking)
         );
